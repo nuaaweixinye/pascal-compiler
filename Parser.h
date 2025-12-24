@@ -1,5 +1,7 @@
 /*
 LL(1) 语法分析器头文件
+语义分析
+P代码生成
 */
 
 
@@ -11,11 +13,16 @@ LL(1) 语法分析器头文件
 #include<unordered_map>
 #include<unordered_set>
 #include"config.h"
+#include"SymbolTable.h"
+#include"Pcode.h"
 
 using namespace std;
 
-
-
+SymbolTable symTable; // 全局符号表实例
+Pcode pcode;      // 全局P代码实例
+vector<string> symName;//辅助变量，存放当前处理的符号名称
+string symValue = "";//辅助变量，存放当前处理的符号值
+vector<int> pc;//辅助变量，存放当前处理的Pcode地址
 
 
 class Parser
@@ -38,6 +45,7 @@ private:
 	bool expectTerminal(const string& name, TokenType t, const string& hint = "") {
 		if (currentToken.type == t) {
 			symbols.erase(symbols.begin());
+
 			currentToken = getNextToken();
 			return true;
 		}
@@ -135,10 +143,16 @@ public:
 		  - <> ：非终结符（语法单元）
 		 */
 		if (symbol == "INTEGER") {
-			return expectTerminal("整数常量", TokenType::INTEGER, "需要整数常量");
+			symValue = currentToken.value;
+			bool flag = expectTerminal("整数常量", TokenType::INTEGER, "需要整数常量");
+			
+			return flag;
 		}
 		if (symbol == "ID") {
-			return expectTerminal("标识符", TokenType::IDENTIFIER, "需要标识符");
+			symName.push_back(currentToken.value);
+			bool flag = expectTerminal("标识符", TokenType::IDENTIFIER, "需要标识符");
+			
+			return flag;
 		}
 		if (symbol == "END") {
 			return expectTerminal("END关键字", TokenType::END, "需要END关键字（程序/块结束标记）");
@@ -184,6 +198,7 @@ public:
 		}
 		if (symbol == "VAR") {
 			return expectTerminal("VAR关键字", TokenType::VAR, "需要VAR关键字（变量声明标记）");
+			
 		}
 		if (symbol == "CONST") {
 			return expectTerminal("CONST关键字", TokenType::CONST, "需要CONST关键字（常量声明标记）");
@@ -211,14 +226,72 @@ public:
 		}
 
 
+		//翻译动作.....................................................
+		if(symbol == "_end_prog") {
+			/* P代码：生成程序结束指令 
+			Code[PC++] = { OPR, 0, 0 };*/
+			pcode.emit("OPR", 0, 0);
+			return true;
+		}
+		if(symbol == "_const") {
+			/* 1. 符号表：{插入常量} */
+			symTable.insertConst(symName[0], stoi(symValue));
+			symName.clear();
+			return true;
+		}
+		if(symbol == "_var") {
+			/* 1. 符号表：{插入变量} */
+			for (const auto& name : symName) {
+				symTable.insertVar(name);
+			}
+			symName.clear();
+			return true;
+		}
+		if(symbol == "_proc") {
+			/* 1. 符号表：{插入过程，进入过程，插入参数} */
+
+			int param_count = symName.size() - 1;//参数个数
+			string procName = symName[0];//过程名
+			
+			symTable.insertProc(procName, param_count);//插入过程，入口待回填
+			symTable.enterProcLayer();//进入过程内层
+			for (const auto& name : symName) {//插入参数
+				symTable.insertParam(name);
+			}
+
+			symName.clear();
+			return true;
+		}
+		if(symbol == "_out_proc") {
+			/*1. 符号表：退出过程，回填*/
+			symTable.exitProcLayer();
+			//回填过程入口地址
+			symTable.fillProcEntry(pc.back());
+			pc.pop_back();
+
+			return true;
+		}
+		if(symbol == "_begin_body") {
+			/*记录pc(入口地址),过程结束回填*/
+			pc.push_back(pcode.PC);
+			
+			return true;
+		}
+
+
+
+
+		//非终结符处理.................................................
 		
 		if (symbol == "<prog>") {
-			//产生式 <prog> → "program" ID ";" <block>
+			//产生式 <prog> → "program" ID   ";" <block> "_end_prog"
 			if (currentToken.type == TokenType::PROGRAM) {
 				symbols.erase(symbols.begin());
+				symbols.insert(symbols.begin(), "_end_prog");
 				symbols.insert(symbols.begin(), "<block>");
 				symbols.insert(symbols.begin(), "SEMICOLON");
 				symbols.insert(symbols.begin(), "ID");
+
 
 				currentToken = getNextToken();
 				return true;
@@ -229,7 +302,7 @@ public:
 		}
 
 		if (symbol == "<block>") {
-			//<block> → <condecl_opt> <vardecl_opt> <proc_opt> <body>
+			//<block> → <condecl_opt> <vardecl_opt> <proc_opt> "_begin_body"  <body> 
 			//first:  "const", "var", "procedure", "begin"
 
 			if (currentToken.type == TokenType::CONST ||
@@ -238,6 +311,7 @@ public:
 				currentToken.type == TokenType::BEGIN) {
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "<body>");
+				symbols.insert(symbols.begin(), "_begin_body");
 				symbols.insert(symbols.begin(), "<proc_opt>");
 				symbols.insert(symbols.begin(), "<vardecl_opt>");
 				symbols.insert(symbols.begin(), "<condecl_opt>");
@@ -278,11 +352,12 @@ public:
 
 		}
 		if (symbol == "<const_list>") {
-			//<const_list> → <const> <const_list_tail>
+			//<const_list> → <const>  "_const" <const_list_tail>
 			//first : ID
 			if (currentToken.type == TokenType::IDENTIFIER) {
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "<const_list_tail>");
+				symbols.insert(symbols.begin(), "_const");
 				symbols.insert(symbols.begin(), "<const>");
 				return true;
 			}
@@ -305,11 +380,12 @@ public:
 			}
 		}
 		if (symbol == "<const_list_tail>") {
-			//<const_list_tail> → "," <const> <const_list_tail> | ε 
+			//<const_list_tail> → "," <const>  "_const"  <const_list_tail> | ε 
 			//first: ",", ε
 			if (currentToken.type == TokenType::COMMA) {
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "<const_list_tail>");
+				symbols.insert(symbols.begin(), "_const");
 				symbols.insert(symbols.begin(), "<const>");
 				currentToken = getNextToken();
 				return true;
@@ -336,10 +412,11 @@ public:
 			}
 		}
 		if (symbol == "<vardecl>") {
-			//<vardecl> → "var" < id_list > ";"
+			//<vardecl> → "var" < id_list >  "_var"  ";"
 			if (currentToken.type == TokenType::VAR) {
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "SEMICOLON");
+				symbols.insert(symbols.begin(), "_var");
 				symbols.insert(symbols.begin(), "<id_list>");
 				currentToken = getNextToken();
 				return true;
@@ -364,11 +441,13 @@ public:
 			}
 		}
 		if (symbol == "<proc>") {
-			//<proc> → "procedure" ID <param_list_opt> ";" <block> <proc_tail> 
+			//<proc> → "procedure" ID <param_list_opt>  "_proc"  ";" <block>   "_out_proc"  <proc_tail> 
 			if (currentToken.type == TokenType::PROCEDURE) {
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "<proc_tail>");
+				symbols.insert(symbols.begin(), "_out_proc");
 				symbols.insert(symbols.begin(), "<block>");
+				symbols.insert(symbols.begin(), "_proc");
 				symbols.insert(symbols.begin(), "SEMICOLON");
 				symbols.insert(symbols.begin(), "<param_list_opt>");
 				symbols.insert(symbols.begin(), "ID");
@@ -380,7 +459,7 @@ public:
 			}
 		}
 		if (symbol == "<param_list_opt>") {
-			//<param_list_opt> → "(" < id_list_opt > ")"
+			//<param_list_opt> → "(" < id_list_opt >      ")"
 			if (currentToken.type == TokenType::LPAREN) {
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "RPAREN");
@@ -816,7 +895,7 @@ public:
 			}
 		}
 		if (symbol == "<id_list>") {
-			//<id_list> → ID <id_list_tail>
+			//<id_list> → ID  <id_list_tail>
 			if (currentToken.type == TokenType::IDENTIFIER) {
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "<id_list_tail>");

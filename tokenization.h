@@ -213,7 +213,7 @@ public:
 	}
 
 	void printtoken(Token token) {
-		// 输出统一格式：TYPE(value)(row,column)
+		// 输出统一格式：TYPE(value)(row,column) 
 		// 先输出 TYPE（大写枚举名对应字符串）
 		switch (token.type)
 		{

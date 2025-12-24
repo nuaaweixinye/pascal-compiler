@@ -203,3 +203,12 @@ public:
 };
 
 
+
+
+// 符号类型枚举（PL/0仅支持常量、变量、过程）
+typedef enum {
+	CONST_SYMBOL,  // 常量
+	VAR_SYMBOL,    // 变量
+	PROC_SYMBOL    // 过程
+} SymbolType;
+
