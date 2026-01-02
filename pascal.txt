@@ -1,68 +1,13 @@
-program complexcalc;
-const maxnum:=10, step:=2;
-var a, b, sum, cnt, factres;
-
-	procedure init();
+program fact;
+var n, res;
+	procedure f(x, r);
+	var t, s;
 	begin
-   	 sum := 0;
-   	 cnt := 1;
-   	 factres := 1
-	end;
-
-	procedure fact(n);
-	begin
-  	  if n = 1 then
-       	 factres := 1
-   	 else
-      	  begin
-           	 call fact(n-1);
-          	  factres := factres * n
-      	  end
-	end;
-
-	procedure accumulate(minval, maxval);
-	var temp;
-	begin
-    	temp := minval;
-    	while temp <= maxval do
-        	begin
-           	 if odd temp then
-                	sum := sum + temp
-            	else
-                	sum := sum + temp / step;
-          	  temp := temp + step
-       	 end
-	end;
-
-	procedure printres();
-		procedure printsep();
-		begin
-    		write(999999999)
-		end
-	begin
-    	call printsep();
-    	write(sum);
-    	write(cnt);
-    	write(factres);
-   	 call printsep()
+	if x=0 then r:=1 else call f(x-1, s);
+	if x>0 then r:=x*s
 	end
-
 begin
-    call init();
-    read(a, b);
-    
-    if a > b then
-        call accumulate(b, a)
-    else
-        call accumulate(a, b);
-    
-    call fact(maxnum);
-    
-    while cnt <= 5 do
-        begin
-            sum := sum + cnt * step;
-            cnt := cnt + 1
-        end;
-    
-    call printres()
+n:=5;
+call f(n, res);
+write(res)
 end

@@ -18,12 +18,20 @@ P代码生成
 
 using namespace std;
 
+int line_num = 0;//正在处理的行号
+
 SymbolTable symTable; // 全局符号表实例
 Pcode pcode;      // 全局P代码实例
+
 vector<string> symName;//辅助变量，存放当前处理的符号名称
-string symValue = "";//辅助变量，存放当前处理的符号值
+vector<string> symValue ;//辅助变量，存放当前处理的符号值
 vector<int> pc;//辅助变量，存放当前处理的Pcode地址
 
+vector <int> tmplop;
+vector<string> sign;
+vector<string> aop;
+vector<string> mop;
+int arg_count = 0;//call调用参数个数
 
 class Parser
 {
@@ -128,7 +136,7 @@ public:
 		}
 
 		token.value = valueStr;
-		token.row = row;
+		line_num=token.row = row;
 		token.column = column;
 		return token;
 	}
@@ -143,7 +151,7 @@ public:
 		  - <> ：非终结符（语法单元）
 		 */
 		if (symbol == "INTEGER") {
-			symValue = currentToken.value;
+			symValue.push_back(currentToken.value);//缓存整数值
 			bool flag = expectTerminal("整数常量", TokenType::INTEGER, "需要整数常量");
 			
 			return flag;
@@ -165,14 +173,22 @@ public:
 		}
 		if (symbol == "LOP") {
 			// LOP → "=" | "<>" | "<" | "<=" | ">" | ">="
+			tmplop.push_back(currentToken.value == "=" ? 7 :
+				currentToken.value == "<>" ? 8 :
+				currentToken.value == "<" ? 9 :
+				currentToken.value == "<=" ? 10 :
+				currentToken.value == ">" ? 11 :
+				currentToken.value == ">=" ? 12: -100);
 			return expectTerminal("关系运算符", TokenType::LOP, "需要关系运算符（=、<>、<、<=、>、>=）");
 		}
 		if (symbol == "MOP") {
 			// MOP → "*" | "/"
+			mop.push_back(currentToken.value);
 			return expectTerminal("乘法/除法运算符", TokenType::MOP, "需要乘法或除法运算符（*、/）");
 		}
 		if (symbol == "AOP") {
 			// AOP → "+" | "-"
+			aop.push_back(currentToken.value);
 			return expectTerminal("加法/减法运算符", TokenType::AOP, "需要加法或减法运算符（+、-）");
 		}
 		if (symbol == "WRITE") {
@@ -227,69 +243,280 @@ public:
 
 
 		//翻译动作.....................................................
-		if(symbol == "_end_prog") {
+		if(symbol == "_prog") {
+			/* P代码：生成程序入口指令 
+			Code[PC++] = { JMP, 0, 0 };*/
+			pcode.addJump();//生成跳转指令
+			pcode.emit("JMP", 0, 0);//入口地址待回填
+
+			/*填写过程名字*/
+			symTable.current_layer_->setLayerName(symName.back());
+			symName.pop_back();
+
+			symbols.erase(symbols.begin());
+			return true;
+		}
+		if (symbol == "_end_prog") {
 			/* P代码：生成程序结束指令 
 			Code[PC++] = { OPR, 0, 0 };*/
 			pcode.emit("OPR", 0, 0);
+			//调试
+			symTable.printTable();
+			pcode.printCode();
+
+			symbols.erase(symbols.begin());
 			return true;
 		}
-		if(symbol == "_const") {
+		if (symbol == "_const") {//一次定义一个常量
 			/* 1. 符号表：{插入常量} */
-			symTable.insertConst(symName[0], stoi(symValue));
-			symName.clear();
+			symTable.insertConst(symName.back(), stoi(symValue.back()));
+			symName.pop_back();
+			symValue.pop_back();
+
+			symbols.erase(symbols.begin());
 			return true;
 		}
-		if(symbol == "_var") {
+		if (symbol == "_var") {//一次定义多个变量
 			/* 1. 符号表：{插入变量} */
 			for (const auto& name : symName) {
 				symTable.insertVar(name);
 			}
 			symName.clear();
+
+			symbols.erase(symbols.begin());
 			return true;
 		}
-		if(symbol == "_proc") {
-			/* 1. 符号表：{插入过程，进入过程，插入参数} */
+		if (symbol == "_proc") {
+			/* 1. 符号表：{插入过程，进入过程,插入参数} */
 
 			int param_count = symName.size() - 1;//参数个数
 			string procName = symName[0];//过程名
-			
-			symTable.insertProc(procName, param_count);//插入过程，入口待回填
-			symTable.enterProcLayer();//进入过程内层
-			for (const auto& name : symName) {//插入参数
+
+			Symbol* proc = symTable.insertProc(procName, param_count,pcode.PC);//插入过程
+			SymLayer* layer =  symTable.enterProcLayer();//进入过程内层
+
+			proc->attr_.proc_attr.layer_ptr = layer;//过程符号指向过程层
+			proc->attr_.proc_attr.entry_addr = pcode.PC;//填写过程入口地址
+			symTable.current_layer_->setLayerName(procName);//填写过程名字
+
+			//插入参数
+			symName.erase(symName.begin());
+			for (const auto& name : symName) {
 				symTable.insertParam(name);
 			}
 
 			symName.clear();
-			return true;
-		}
-		if(symbol == "_out_proc") {
-			/*1. 符号表：退出过程，回填*/
-			symTable.exitProcLayer();
-			//回填过程入口地址
-			symTable.fillProcEntry(pc.back());
-			pc.pop_back();
 
+			/*2. pcode {生成过程入口跳转指令}*/
+			pcode.addJump();
+			pcode.emit("JMP", 0, 0); //地址待回填
+
+			symbols.erase(symbols.begin());
 			return true;
 		}
-		if(symbol == "_begin_body") {
-			/*记录pc(入口地址),过程结束回填*/
-			pc.push_back(pcode.PC);
+		if (symbol == "_out_proc") {
+			/*1. 符号表：退出过程*/
+			symTable.exitProcLayer();//退出过程内层
+		
+
+			/*2. pcode 生成过程返回指令*/
+			pcode.emit("OPR", 0, 0); // 过程返回指令
+
+			symbols.erase(symbols.begin());
+			return true;
+		}
+		if (symbol == "_begin_body") {
+			/*回填pcode入口跳转指令*/
+			pcode.fillJump(pcode.PC);
 			
+			symbols.erase(symbols.begin());
+			return true;
+		}
+		if (symbol == "_assignment") {
+			/* P代码：生成赋值指令 
+			Code[PC++] = { STO, L, A };*/
+			int level_diff;
+			Symbol* var_sym = symTable.findGlobal(symName.back(), level_diff);
+			//检查左值类型
+			if (var_sym->getType() != SYMBOLTYPE::PARAM && var_sym->getType() != SYMBOLTYPE::VAR) {
+				cerr << line_num << "行,对于赋值，" << symName.back() << "不是变量或参数" << endl;
+			}
+
+			symName.pop_back();
+			pcode.emit("STO", level_diff, var_sym->getOffset());
+
+			symbols.erase(symbols.begin());
+			return true;
+		}
+		if (symbol == "_if") {
+			//pcode if开头跳转控制
+			pcode.newLabel("if_JPC", pcode.PC);
+			pcode.emit("JPC", 0, 0);//待回填
+
+			symbols.erase(symbols.begin());
+			return true;
+		}
+		if (symbol == "_else_if") {
+			//回填if JPC
+			pcode.backPatch("if_JPC", pcode.PC);
+
+			symbols.erase(symbols.begin());
+			return true;
+		}
+		if (symbol == "_while") {
+			//生成标签
+			pcode.newLabel("while_JPC", pcode.PC);
+			/*生成while 跳转指令JPC*/
+			pcode.emit("JPC", 0, 0);//待回填
+
+			symbols.erase(symbols.begin());
+			return true;
+			
+		}
+		if (symbol == "_end_while") {
+			//回填while 跳转指令JPC
+			pcode.backPatch("while_JPC", pcode.PC);
+
+			symbols.erase(symbols.begin());
+			return true;
+		}
+		if (symbol == "_call") {
+			//pcode 生成call指令
+			string procName = symName.back();
+			symName.pop_back();
+			int level_diff = 0;
+			Symbol* proc_sym = symTable.findGlobal(procName, level_diff);
+			//检查形参个数
+			if (arg_count != proc_sym->attr_.proc_attr.param_count) {
+				cerr << line_num << "行,过程" << procName << "调用时参数个数不匹配，定义时参数个数为"
+					<< proc_sym->attr_.proc_attr.param_count << "，调用时传入参数个数为" << arg_count << endl;
+			}
+			//生成STO指令
+			for(int i=1;i<=arg_count;i++) {
+				pcode.emit("STO", -1, 3+i);
+			}
+
+			pcode.emit("CAL", level_diff, proc_sym->getProcEntryAddr());
+			arg_count = 0;//清空参数个数
+
+			symbols.erase(symbols.begin());
+			return true;
+		}
+		if (symbol == "_read") {
+			//对每个变量生成RED+STO指令,读整数，压入栈顶，赋值
+			for (auto x : symName) {
+				pcode.emit("RED", 0, 0);
+				int level_diff = 0;
+				Symbol* sym = symTable.findGlobal(x, level_diff);
+
+				pcode.emit("STO",level_diff ,sym->getOffset()+3 );
+			}
+			symName.clear();
+
+			symbols.erase(symbols.begin());
+			return true;
+		}
+		if (symbol == "_write") {
+			while (arg_count-- > 0) {
+			//pcode 生成WRT指令
+				pcode.emit("WRT", 0, 0);
+			}
+
+			symbols.erase(symbols.begin());
+			return true;
+		}
+		if (symbol == "_exp_explist") {
+			arg_count++;//记录参数个数,用于call和write
+			
+			symbols.erase(symbols.begin());
 			return true;
 		}
 
+		if (symbol == "_oddlexp") {
+			/* P代码：生成ODD运算（OPR 0 6） */
+			pcode.emit("OPR", 0, 6);
+
+			symbols.erase(symbols.begin());
+			return true;
+		}
+		if (symbol == "_cmplexp") {
+			/* P代码：生成关系运算OPR指令 */
+			pcode.emit("OPR", 0, tmplop.back());
+			tmplop.pop_back();
+
+			symbols.erase(symbols.begin());
+			return true;
+		}
+		if (symbol == "_aop_exp"){
+			string a = aop.back();
+			aop.pop_back();
+			if (a == "+") {
+				pcode.emit("OPR", 0, 2);
+			}
+			else if (a == "-") {
+				pcode.emit("OPR", 0, 3);
+			}
+
+			symbols.erase(symbols.begin());
+			return true;
+		}
+		if (symbol == "_mop_term") {
+			//pcode 生成乘除指令
+			string m = mop.back();
+			mop.pop_back();
+			if(m == "*") {
+				pcode.emit("OPR", 0, 4);
+			}
+			else if (m == "/") {
+				pcode.emit("OPR", 0, 5);
+			}
+
+			symbols.erase(symbols.begin());
+			return true;
+		}
+		if (symbol == "_integer_factor") {
+			/* P代码：生成加载常量指令 
+			Code[PC++] = { LIT, 0, value };*/
+			int value = stoi(symValue.back());
+			symValue.pop_back();
+			pcode.emit("LIT", 0, value);
+
+			symbols.erase(symbols.begin());
+			return true;
+		}
+		if (symbol == "_id_factor") {
+			/* P代码：生成加载变量/常量/参数指令 
+			Code[PC++] = { LIT, 0, value };*/
+
+			int diff = 0;
+			Symbol* sym = symTable.findGlobal( symName.back(), diff);
+			symName.pop_back();
+
+			//检查符号类型
+			if (sym->getType() == SYMBOLTYPE::PROC) {
+				cerr << line_num << "行,表达式中，" << sym->name_ << "是过程，不能作为因子" << endl;
+			}
+
+			int A = sym->getValue();
+			pcode.emit("LIT", 0, A);
+
+
+			symbols.erase(symbols.begin());
+			return true;
+		}
 
 
 
 		//非终结符处理.................................................
 		
 		if (symbol == "<prog>") {
-			//产生式 <prog> → "program" ID   ";" <block> "_end_prog"
+			//产生式 <prog> →"program" ID  "_prog"  ";" <block> "_end_prog"
 			if (currentToken.type == TokenType::PROGRAM) {
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "_end_prog");
 				symbols.insert(symbols.begin(), "<block>");
 				symbols.insert(symbols.begin(), "SEMICOLON");
+				symbols.insert(symbols.begin(), "_prog");
 				symbols.insert(symbols.begin(), "ID");
 
 
@@ -371,8 +598,8 @@ public:
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "INTEGER");
 				symbols.insert(symbols.begin(), "COLONEQUAL");
+				symbols.insert(symbols.begin(), "ID");
 
-				currentToken = getNextToken();
 				return true;
 			}
 			else {
@@ -459,7 +686,7 @@ public:
 			}
 		}
 		if (symbol == "<param_list_opt>") {
-			//<param_list_opt> → "(" < id_list_opt >      ")"
+			//<param_list_opt> → "(" < id_list_opt >  ")"
 			if (currentToken.type == TokenType::LPAREN) {
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "RPAREN");
@@ -551,8 +778,8 @@ public:
 		}
 
 		if (symbol == "<statement>") {
-			/*<statement>   →  ID ":=" <exp>  // 赋值语句
-			| "if" < lexp > "then" < statement > <else_opt>       // 条件语句
+			/*<statement>   →  ID    ":=" <exp>  "_assignment"  // 赋值语句
+			| "if"   < lexp >  "_if"  "then" < statement > "_else_if" <else_opt>       // 条件语句
 			| <while_stmt>     // 循环语句（当型）
 			| <call_stmt>      // 过程调用语句
 			| <body>           // 嵌套复合语句
@@ -562,18 +789,22 @@ public:
 			//first: ID, "if", "while", "call", "begin", "read", "write"
 			if (currentToken.type == TokenType::IDENTIFIER) {
 				symbols.erase(symbols.begin());
+				symbols.insert(symbols.begin(), "_assignment");
 				symbols.insert(symbols.begin(), "<exp>");
 				symbols.insert(symbols.begin(), "COLONEQUAL");
+				symbols.insert(symbols.begin(), "ID");
 
-				currentToken = getNextToken();
 				return true;
 			}
 			else if (currentToken.type == TokenType::IF) {
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "<else_opt>");
+				symbols.insert(symbols.begin(), "_else_if");
 				symbols.insert(symbols.begin(), "<statement>");
 				symbols.insert(symbols.begin(), "THEN");
+				symbols.insert(symbols.begin(), "_if");
 				symbols.insert(symbols.begin(), "<lexp>");
+				
 
 				currentToken = getNextToken();
 				return true;
@@ -625,12 +856,16 @@ public:
 		}
 
 		if (symbol == "<while_stmt>") {
-			//<while_stmt>  → "while" <lexp> "do" <statement>
+			//<while_stmt>  → "while" <lexp> "_while"  "do" <statement> "_end_while"
 			if (currentToken.type == TokenType::WHILE) {
 				symbols.erase(symbols.begin());
+				symbols.insert(symbols.begin(), "_end_while");
 				symbols.insert(symbols.begin(), "<statement>");
 				symbols.insert(symbols.begin(), "DO");
+				symbols.insert(symbols.begin(), "_while");
 				symbols.insert(symbols.begin(), "<lexp>");
+
+
 				currentToken = getNextToken();
 				return true;
 			}
@@ -662,9 +897,10 @@ public:
 		}
 
 		if (symbol == "<odd_lexp>") {
-			//<odd_lexp> → "odd" < exp >  
+			//<odd_lexp> → "odd" < exp >  "_oddlexp"  
 			if (currentToken.type == TokenType::ODD) {
 				symbols.erase(symbols.begin());
+				symbols.insert(symbols.begin(), "_oddlexp");
 				symbols.insert(symbols.begin(), "<exp>");
 				currentToken = getNextToken();
 				return true;
@@ -674,7 +910,7 @@ public:
 			}
 		}
 		if (symbol == "<exp>"){
-			//<exp>→ <sign_opt> <term> <exp_tail>
+			//<exp>→ <sign_opt> <term>   <exp_tail>
 			//first: AOP, ID, <integer>, "("
 			if (currentToken.type == TokenType::AOP ||
 				currentToken.type == TokenType::IDENTIFIER ||
@@ -693,11 +929,11 @@ public:
 
 		}
 		if (symbol == "<sign_opt>") {
-			//<sign_opt> → AOP | ε 
+			//<sign_opt> → AOP   | ε 
 			//first: AOP, ε
 			if (currentToken.type == TokenType::AOP) {
 				symbols.erase(symbols.begin());
-				currentToken = getNextToken();
+				symbols.insert(symbols.begin(), "AOP");
 				return true;
 			}
 			else {
@@ -722,16 +958,21 @@ public:
 			}
 		}
 		if (symbol == "<factor>") {
-			//<factor> → ID | <integer> | "(" <exp> ")"
+			/*<factor> → ID  "_id_factor"
+			 | <integer>  "_interger_factor" 
+			 | "(" <exp> ")"
+			 */
 			//first: ID, <integer>, "("
 			if (currentToken.type == TokenType::IDENTIFIER) {
 				symbols.erase(symbols.begin());
-				currentToken = getNextToken();
+				symbols.insert(symbols.begin(), "_id_factor");
+				symbols.insert(symbols.begin(), "ID");
 				return true;
 			}
 			else if (currentToken.type == TokenType::INTEGER) {
 				symbols.erase(symbols.begin());
-				currentToken = getNextToken();
+				symbols.insert(symbols.begin(), "_integer_factor");
+				symbols.insert(symbols.begin(), "INTEGER");
 				return true;
 			}
 			else if (currentToken.type == TokenType::LPAREN) {
@@ -747,14 +988,15 @@ public:
 		}
 
 		if (symbol ==  "<exp_tail>") {
-			//<exp_tail> → AOP <term> <exp_tail> | ε 
+			//<exp_tail> → AOP <term>  "_aop_exp"  <exp_tail> | ε 
 			//first: AOP, ε
 			if (currentToken.type == TokenType::AOP) {
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "<exp_tail>");
+				symbols.insert(symbols.begin(), "_aop_exp");
 				symbols.insert(symbols.begin(), "<term>");
+				symbols.insert(symbols.begin(), "AOP");
 
-				currentToken = getNextToken();
 				return true;
 			}
 			else {
@@ -764,14 +1006,15 @@ public:
 			}
 		}
 		if (symbol == "<term_tail>") {
-			//<term_tail> → MOP <factor> <term_tail> | ε   
+			//<term_tail> → MOP <factor> "_mop_term"   <term_tail> | ε   
 			//first: MOP, ε
 			if (currentToken.type == TokenType::MOP) {
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "<term_tail>");
+				symbols.insert(symbols.begin(), "_mop_term");
 				symbols.insert(symbols.begin(), "<factor>");
+				symbols.insert(symbols.begin(), "MOP");
 
-				currentToken = getNextToken();
 				return true;
 			}
 			else {
@@ -782,13 +1025,14 @@ public:
 		}
 
 		if (symbol == "<cmp_lexp>") {
-			//<cmp_lexp> → <exp> LOP <exp>
+			//<cmp_lexp> → <exp> LOP <exp> "_cmplexp"
 			//first: ID, <integer>, "(", AOP
 			if (currentToken.type == TokenType::IDENTIFIER ||
 				currentToken.type == TokenType::INTEGER ||
 				currentToken.type == TokenType::LPAREN ||
 				currentToken.type == TokenType::AOP) {
 				symbols.erase(symbols.begin());
+				symbols.insert(symbols.begin(), "_cmplexp");
 				symbols.insert(symbols.begin(), "<exp>");
 				symbols.insert(symbols.begin(), "LOP");
 				symbols.insert(symbols.begin(), "<exp>");
@@ -801,9 +1045,11 @@ public:
 		
 
 		if (symbol == "<call_stmt>") {
-			//<call_stmt> → "call" ID <arg_list_opt>
+			//<call_stmt> → "call" ID <arg_list_opt> "_call"
 			if (currentToken.type == TokenType::CALL) {
 				symbols.erase(symbols.begin());
+				arg_count = 0;//初始化参数个数
+				symbols.insert(symbols.begin(), "_call");
 				symbols.insert(symbols.begin(), "<arg_list_opt>");
 				symbols.insert(symbols.begin(), "ID");
 				currentToken = getNextToken();
@@ -846,7 +1092,7 @@ public:
 			}
 		}
 		if (symbol == "<exp_list>") {
-			//<exp_list> → <exp> <exp_list_tail>
+			//<exp_list> → <exp> "_exp_explist" <exp_list_tail>
 			//first: ID, <integer>, "(", AOP
 			if (currentToken.type == TokenType::IDENTIFIER ||
 				currentToken.type == TokenType::INTEGER ||
@@ -854,6 +1100,7 @@ public:
 				currentToken.type == TokenType::AOP) {
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "<exp_list_tail>");
+				symbols.insert(symbols.begin(), "_exp_explist");
 				symbols.insert(symbols.begin(), "<exp>");
 				return true;
 			}
@@ -862,12 +1109,14 @@ public:
 			}
 		}
 		if (symbol == "<exp_list_tail>") {
-			//<exp_list_tail> → "," <exp> <exp_list_tail> | ε
+			//<exp_list_tail> → "," <exp> _exp_explist <exp_list_tail> | ε
 			//first: ",", ε
 			if (currentToken.type == TokenType::COMMA) {
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "<exp_list_tail>");
+				symbols.insert(symbols.begin(), "_exp_explist");
 				symbols.insert(symbols.begin(), "<exp>");
+
 				currentToken = getNextToken();
 				return true;
 			}
@@ -880,10 +1129,11 @@ public:
 
 
 		if (symbol ==  "<read_stmt>") {
-			//<read_stmt>   → "read" "(" < id_list > ")"
+			//<read_stmt>   → "read" "(" < id_list >  "_read"  ")"
 			if (currentToken.type == TokenType::READ) {
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "RPAREN");
+				symbols.insert(symbols.begin(), "_read");
 				symbols.insert(symbols.begin(), "<id_list>");
 				symbols.insert(symbols.begin(), "LPAREN");
 
@@ -912,6 +1162,7 @@ public:
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "<id_list_tail>");
 				symbols.insert(symbols.begin(), "ID");
+
 				currentToken = getNextToken();
 				return true;
 			}
@@ -924,10 +1175,12 @@ public:
 
 
 		if (symbol == "<write_stmt>") {
-			//<write_stmt>  → "write" "(" < exp_list > ")"
+			//<write_stmt>  → "write" "(" < exp_list >   "_write"   ")"
 			if (currentToken.type == TokenType::WRITE) {
 				symbols.erase(symbols.begin());
+				arg_count = 0;//初始化参数个数
 				symbols.insert(symbols.begin(), "RPAREN");
+				symbols.insert(symbols.begin(), "_write");
 				symbols.insert(symbols.begin(), "<exp_list>");
 				symbols.insert(symbols.begin(), "LPAREN");
 				currentToken = getNextToken();
@@ -951,7 +1204,7 @@ public:
 
 		while (!symbols.empty()) {
 			string symbol = symbols.front();
-			//cout << symbol << endl;
+			cout << symbol <<"|" << currentToken.value << endl;
 			if(!match(symbol)){
 				FirstSet fs;
 				cerr << "\n语法错误\t也许你期望："<<symbol;

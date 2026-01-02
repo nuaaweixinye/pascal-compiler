@@ -211,4 +211,3 @@ typedef enum {
 	VAR_SYMBOL,    // 变量
 	PROC_SYMBOL    // 过程
 } SymbolType;
-

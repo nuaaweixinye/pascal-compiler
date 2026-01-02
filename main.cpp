@@ -4,6 +4,8 @@
 #include"tokenization.h"
 #include"Parser.h"
 
+using namespace std;
+
 int main(int argc,char* argv[])
 {
 	if (argc == 3) {
@@ -19,10 +21,6 @@ int main(int argc,char* argv[])
 		Parser paser("out.txt");
 		paser.parse();
 	}
-
-
-
-
 
 	return 0;
 }
