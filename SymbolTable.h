@@ -344,7 +344,6 @@ public:
         if (current_layer_->findInLayer(name) != nullptr) {
             throw SymbolError(SymErrType::DUP_DEF, name);
         }
-        current_layer_->incVarOffset();
         Symbol* sym = Symbol::createProc(name, current_layer_->getLevel(), param_count, entry_addr);
         current_layer_->insertSymbol(sym);
 		return sym;
@@ -390,7 +389,35 @@ public:
         return sym;
     }
 
+    //根据入口地址查找过程符号
+    SymLayer* findProcByEntry(int entry_addr) {
+        // 从最外层开始层级遍历（广度优先/层序）
+        vector<SymLayer*> layers;
+        layers.push_back(first_layer_);
 
+        while (!layers.empty()) {
+            SymLayer* layer = layers.front();
+            layers.erase(layers.begin());
+            if (layer == nullptr) continue;
+
+            Symbol* sym = layer->sym_head_;
+            while (sym != nullptr) {
+                // 找到过程且入口地址匹配，返回该过程对应的内层 SymLayer 指针（可能为 nullptr）
+                if (sym->getType() == SYMBOLTYPE::PROC && sym->getProcEntryAddr() == entry_addr) {
+                    return sym->attr_.proc_attr.layer_ptr;
+                }
+                // 若是过程且有内层，则把内层加入遍历队列
+                if (sym->getType() == SYMBOLTYPE::PROC && sym->attr_.proc_attr.layer_ptr != nullptr) {
+                    layers.push_back(sym->attr_.proc_attr.layer_ptr);
+                }
+                sym = sym->getNext();
+            }
+        }
+
+        // 未找到则返回 nullptr（调用方可根据需要抛错或处理）
+		cerr << "警告：未找到入口地址为 " << entry_addr << " 的过程符号" << endl;
+        return nullptr;
+    }
 
 
     // ========== 作用域管理（适配<proc>的内层/外层切换） ==========

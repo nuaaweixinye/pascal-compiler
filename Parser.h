@@ -343,7 +343,7 @@ public:
 			}
 
 			symName.pop_back();
-			pcode.emit("STO", level_diff, var_sym->getOffset());
+			pcode.emit("STO", var_sym->getLevel(), var_sym->getOffset());
 
 			symbols.erase(symbols.begin());
 			return true;
@@ -357,9 +357,19 @@ public:
 			return true;
 		}
 		if (symbol == "_else_if") {
+			
+			//生成then跳转指令
+			pcode.newLabel("else_JMP", pcode.PC);
+			pcode.emit("JMP", 0, 0);//待回填
 			//回填if JPC
 			pcode.backPatch("if_JPC", pcode.PC);
 
+			symbols.erase(symbols.begin());
+			return true;
+		}
+		if (symbol == "_end_else") {
+			//回填else JMP
+			pcode.backPatch("else_JMP", pcode.PC);
 			symbols.erase(symbols.begin());
 			return true;
 		}
@@ -392,8 +402,8 @@ public:
 					<< proc_sym->attr_.proc_attr.param_count << "，调用时传入参数个数为" << arg_count << endl;
 			}
 			//生成STO指令
-			for(int i=1;i<=arg_count;i++) {
-				pcode.emit("STO", -1, 3+i);
+			for(int i=0;i<arg_count;i++) {
+				pcode.emit("STO", -1, i, arg_count - i - 1);
 			}
 
 			pcode.emit("CAL", level_diff, proc_sym->getProcEntryAddr());
@@ -486,7 +496,7 @@ public:
 		}
 		if (symbol == "_id_factor") {
 			/* P代码：生成加载变量/常量/参数指令 
-			Code[PC++] = { LIT, 0, value };*/
+			Code[PC++] = { LOD, L, id };*/
 
 			int diff = 0;
 			Symbol* sym = symTable.findGlobal( symName.back(), diff);
@@ -497,8 +507,8 @@ public:
 				cerr << line_num << "行,表达式中，" << sym->name_ << "是过程，不能作为因子" << endl;
 			}
 
-			int A = sym->getValue();
-			pcode.emit("LIT", 0, A);
+			int A = sym->getOffset();
+			pcode.emit("LOD", sym->getLevel(), A);
 
 
 			symbols.erase(symbols.begin());
@@ -779,7 +789,7 @@ public:
 
 		if (symbol == "<statement>") {
 			/*<statement>   →  ID    ":=" <exp>  "_assignment"  // 赋值语句
-			| "if"   < lexp >  "_if"  "then" < statement > "_else_if" <else_opt>       // 条件语句
+			| "if"   < lexp >  "_if"  "then" < statement > "_else_if" <else_opt> "_end_else"     // 条件语句
 			| <while_stmt>     // 循环语句（当型）
 			| <call_stmt>      // 过程调用语句
 			| <body>           // 嵌套复合语句
@@ -798,6 +808,7 @@ public:
 			}
 			else if (currentToken.type == TokenType::IF) {
 				symbols.erase(symbols.begin());
+				symbols.insert(symbols.begin(), "_end_else");
 				symbols.insert(symbols.begin(), "<else_opt>");
 				symbols.insert(symbols.begin(), "_else_if");
 				symbols.insert(symbols.begin(), "<statement>");
@@ -1198,7 +1209,7 @@ public:
 	}
 
 	void parse() {
-		cout << "\n开始语法分析... " << endl;
+		cout << "\n开始语法分析,语义分析，pcode生成，符号表生成... " << endl;
 
 		currentToken = getNextToken();
 
@@ -1216,6 +1227,9 @@ public:
 		}
 
 		cout << "\n语法分析成功，源程序符合语法规则！" << endl;
+		cout << "符号表建立，pcode生成完毕！\n\n" << endl;
+
+		pcode.interpret(symTable);
 		
 	}
 
