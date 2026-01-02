@@ -3,11 +3,15 @@
 #include<iostream>
 #include<vector>
 #include<string>
+#include<fstream>
 // 包含反向迭代器所需头文件（部分编译器需显式包含）
 #include<iterator>
 #include"SymbolTable.h"
 
 using namespace std;
+
+fstream File;
+
 
 /*
 F,L,A 三段式指令
@@ -164,7 +168,7 @@ public:
 		int param_num = symlayer->param_count_;
 		name = symlayer->getLayerName();
 		define_layer = symlayer->getLevel();
-
+		File << "\nnewAc:" << name  << endl;
 		push(to_string(base));//动态链接DL
 		push("0");//返回地址RA
 
@@ -211,6 +215,7 @@ public:
 		layer--;
 		//返回地址暂不处理，由解释器负责PC的修改
 		cout << "\n返回上一个活动记录，当前层级：" << layer << endl;
+		File << "\nback " << layer << endl;
 	}
 
 	void printStack() {
@@ -218,6 +223,7 @@ public:
 		cout << "\n当前活动记录栈内容：" << endl;
 		for(int i = top - 1; i >= 0; i--) {
 			cout << "[" << i << "]: " << stack.at(i) << endl;
+			File << "[" << i << "]: " << stack.at(i) << endl;
 		}
 	}
 };
@@ -325,12 +331,18 @@ public:
 		Ac.init(symTable); // 初始化活动记录栈
 		vector<vector<int>> args; // 新活动记录的参数存储
 
+		File.open("pcode_output.txt", ios::out);
+		if(!File.is_open()) {
+			cerr << "无法打开输出文件" << endl;
+			return;
+		}
 
 		while (1) {
 			Ins instr = getInstruction(pc);
 			pc++;
 			string op = instr.op;
 			cout<<pc-1<<": " << op << " " << instr.L << " " << instr.A << endl;
+			File << pc - 1 << ": " << op << " " << instr.L << " " << instr.A << endl;
 			if(op == "LIT") {// 常量入栈
 				int value = instr.A;
 				Ac.push(to_string(value));
@@ -530,9 +542,9 @@ public:
 				break;
 			}
 			
+			Ac.printStack();
 		}
 
-		Ac.printStack();
 	}
 
 

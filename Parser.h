@@ -1215,7 +1215,7 @@ public:
 
 		while (!symbols.empty()) {
 			string symbol = symbols.front();
-			cout << symbol <<"|" << currentToken.value << endl;
+			//cout << symbol <<"|" << currentToken.value << endl;
 			if(!match(symbol)){
 				FirstSet fs;
 				cerr << "\n语法错误\t也许你期望："<<symbol;
