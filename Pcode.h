@@ -12,6 +12,8 @@ using namespace std;
 
 fstream File;
 
+bool key = false;//关键字标志
+vector<int> write_result;//写入结果存放
 
 /*
 F,L,A 三段式指令
@@ -202,8 +204,10 @@ public:
 	
 		base = newbase;
 		layer++;
-		cout << "\n进入新活动记录，当前层级：" << layer << endl;
-		cout << "base=" << base << ",top=" << top << endl;
+		if (key) {
+			cout << "\n进入新活动记录，当前层级：" << layer << endl;
+			cout << "base=" << base << ",top=" << top << endl;
+		}
 	}
 	void returnAc() {
 		//恢复上一个活动记录
@@ -214,7 +218,9 @@ public:
 		base = return_base;
 		layer--;
 		//返回地址暂不处理，由解释器负责PC的修改
-		cout << "\n返回上一个活动记录，当前层级：" << layer << endl;
+		if (key) {
+			cout << "\n返回上一个活动记录，当前层级：" << layer << endl;
+		}
 		File << "\nback " << layer << endl;
 	}
 
@@ -426,6 +432,10 @@ public:
 					case 0:// 过程返回
 					{
 						if (returnStack.empty()) {
+							for (int i : write_result) {
+								cout << "输出: " << i << endl;
+								//File << "输出: " << i << endl;
+							}
 							cout << "程序结束" << endl;
 							return;
 						}
@@ -533,16 +543,14 @@ public:
 
 			}
 			else if (op == "WRT") {// 栈顶值输出
-				string output = Ac.pop();
-				cout <<"输出" << output << endl;
+				write_result.push_back(stoi(Ac.pop()));
 			}
 
 			else {
 				cerr << "未知操作码: " << op << endl;
 				break;
 			}
-			
-			Ac.printStack();
+			if(key) Ac.printStack();
 		}
 
 	}

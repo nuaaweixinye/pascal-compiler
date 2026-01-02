@@ -1,13 +1,24 @@
 program fact;
-var n, res;
+var n, res,res1;
 	procedure f(x, r);
 	var t, s;
 	begin
-	if x=0 then r:=1 else call f(x-1, s);
-	if x>0 then r:=x*s
+	if x=0 then res:=1 else call f(x-1, res);
+	if x>0 then res:=res+x
+	end;
+
+	procedure add(b,c);
+	var tmp1,tmp2;
+	begin
+	while res1>=b do res1:=res1-c
 	end
+	
 begin
 n:=5;
+res:=1;
+res1:=20;
 call f(n, res);
-write(res)
+call add(10,4);
+write(res);
+write(res1)
 end

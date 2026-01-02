@@ -32,6 +32,8 @@ vector<string> sign;
 vector<string> aop;
 vector<string> mop;
 int arg_count = 0;//call调用参数个数
+vector<int> begin_while;//while语句开始地址栈
+
 
 class Parser
 {
@@ -373,6 +375,12 @@ public:
 			symbols.erase(symbols.begin());
 			return true;
 		}
+		if(symbol == "_begin_while") {
+			//记录while开始地址
+			begin_while.push_back(pcode.PC);
+			symbols.erase(symbols.begin());
+			return true;
+		}
 		if (symbol == "_while") {
 			//生成标签
 			pcode.newLabel("while_JPC", pcode.PC);
@@ -384,8 +392,12 @@ public:
 			
 		}
 		if (symbol == "_end_while") {
+			//生成跳转回while开始地址指令JMP
+			pcode.emit("JMP", 0, begin_while.back());
+			begin_while.pop_back();
 			//回填while 跳转指令JPC
 			pcode.backPatch("while_JPC", pcode.PC);
+
 
 			symbols.erase(symbols.begin());
 			return true;
@@ -867,7 +879,7 @@ public:
 		}
 
 		if (symbol == "<while_stmt>") {
-			//<while_stmt>  → "while" <lexp> "_while"  "do" <statement> "_end_while"
+			//<while_stmt>  → "while" "_begin_while"  " <lexp> "_while"  "do" <statement> "_end_while"
 			if (currentToken.type == TokenType::WHILE) {
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "_end_while");
@@ -875,6 +887,7 @@ public:
 				symbols.insert(symbols.begin(), "DO");
 				symbols.insert(symbols.begin(), "_while");
 				symbols.insert(symbols.begin(), "<lexp>");
+				symbols.insert(symbols.begin(), "_begin_while");
 
 
 				currentToken = getNextToken();
