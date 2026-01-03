@@ -12,14 +12,14 @@ using namespace std;
 
 fstream File;
 
-bool key = false;//用于调试
+bool key = true;//用于调试
 vector<int> write_result;//写入结果存放
 
 /*
 F,L,A 三段式指令
-F段代表伪操作码
-L段代表调用层与说明层的层差值
-A段代表位移量（相对地址）
+F段伪操作码
+L段定义层
+A段位移量（相对地址）
 */
 enum class op {
 	LIT,  // 常量入栈（Load Literal）

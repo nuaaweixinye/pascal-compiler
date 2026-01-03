@@ -4,7 +4,6 @@ LL(1) 语法分析器头文件
 P代码生成
 */
 
-
 #pragma once
 #include<fstream>
 #include<string>
@@ -356,7 +355,11 @@ public:
 		if (symbol == "_proc") {
 			/* 1. 符号表：{插入过程，进入过程,插入参数} */
 
-			int param_count = symName.size() - 1;//参数个数
+			int param_count = 0;
+			if (!symName.empty()) {
+				// symName[0] 为过程名，剩余元素为参数名
+				param_count = static_cast<int>(symName.size()) - 1;
+			}
 			string procName = symName[0];//过程名
 
 			Symbol* proc = symTable.insertProc(procName, param_count,pcode.PC);//插入过程
@@ -501,7 +504,12 @@ public:
 				int level_diff = 0;
 				Symbol* sym = symTable.findGlobal(x, level_diff);
 
-				pcode.emit("STO",level_diff ,sym->getOffset()+3 );
+				// 只允许变量或参数作为 read 的目标
+				if (sym->getType() != SYMBOLTYPE::VAR && sym->getType() != SYMBOLTYPE::PARAM) {
+					reportSemanticError(sym->getName() + " 不是变量，不能作为 read 的目标", currentToken);
+				}
+
+				pcode.emit("STO", level_diff, sym->getOffset() + 3);
 			}
 			symName.clear();
 
@@ -579,21 +587,28 @@ public:
 			return true;
 		}
 		if (symbol == "_id_factor") {
-			/* P代码：生成加载变量/常量/参数指令 
-			Code[PC++] = { LOD, L, id };*/
+			/* P代码：生成加载变量/常量/参数指令 或 加载常量指令
+				对常量生成 LIT 指令；对变量/参数生成 LOD 指令。 */
 
+			// 查找符号（若未定义会在 lookupSymbolOrReport 中报告语义错误并终止）
 			int diff = 0;
 			Symbol* sym = lookupSymbolOrReport(symName.back(), currentToken);
 			symName.pop_back();
 
-			//检查符号类型
+			// 检查不能把过程作为因子
 			if (sym->getType() == SYMBOLTYPE::PROC) {
 				reportSemanticError(sym->getName() + " 是过程，不能作为因子", currentToken);
 			}
 
-			int A = sym->getOffset();
-			pcode.emit("LOD", sym->getLevel(), A);
-
+			// 根据符号类型分别生成 Pcode
+			if (sym->getType() == SYMBOLTYPE::Const) {
+				// 常量：直接把常量值作为字面量加载
+				pcode.emit("LIT", 0, sym->getConstVal());
+			}
+			else {
+				// 变量或参数：从相应层和偏移加载
+				pcode.emit("LOD", sym->getLevel(), sym->getOffset());
+			}
 
 			symbols.erase(symbols.begin());
 			return true;
@@ -1312,10 +1327,9 @@ public:
 		cout << "\n开始语法分析,语义分析，pcode生成，符号表生成... " << endl;
 
 		currentToken = getNextToken();
-		cout << "ok" << endl;
 		while (!symbols.empty()) {
 			string symbol = symbols.front();
-			cout << symbol <<"|" << currentToken.value << endl;
+			//cout << symbol <<"|" << currentToken.value << endl;
 			if(!match(symbol)){
 				FirstSet fs;
 				cerr << "\n碰到语法错误" << endl;
