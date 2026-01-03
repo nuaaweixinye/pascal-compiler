@@ -43,6 +43,10 @@ private:
 	fstream srcFile;//中间文件，存放词法分析结果
 	vector<string> symbols;//符号栈，非终结符
 	Token currentToken;
+	tokenizationer tokener;//词法分析器
+	vector<Token> tokens;
+
+
 	string state = "";//当前状态
 	unordered_set<string> panicstates = { "assignment","if","while","call","read","write"};
 	unordered_map<string, vector<string>> panicstatemap = {
@@ -98,7 +102,7 @@ private:
 
 
 public:
-	Parser(const string& srcPath) {
+	Parser(const string& srcPath):tokener("pascal.txt", "out.txt") {
 		srcFile.open(srcPath);
 		if (!srcFile.is_open()) {
 			cerr << "源文件" << srcPath << "打开失败" << endl;
@@ -112,72 +116,83 @@ public:
 		}
 	}
 
-	Token getNextToken() {// 从 srcFile 中获取下一个 Token 的逻辑
+	Token getNextToken() {// 获取下一个 Token 的逻辑
 		if (back_token) {
 			back_token = false;
 			return Token();
 		}
 
+		//缓冲区方式
 
-		std::string line;
-		// 读取一行，若读不到则返回 EOF token
-		if (!std::getline(srcFile, line)) {
-			return Token{ TokenType::EOF_TOKEN, "EOF", 0, 0 };
+		if (tokens.empty()) {
+			tokener.getTokens(20, tokens);
 		}
+		Token t = tokens.front();
+		tokens.erase(tokens.begin());
+		return t;
 
-		// 跳过空行
-		while (line.empty() && std::getline(srcFile, line)) {}
-		if (line.empty()) {
-			return Token{ TokenType::EOF_TOKEN, "EOF", 0, 0 };
-		}
 
-		// 期望格式: TYPE(value)(row,column)
-		auto p1 = line.find('(');
-		if (p1 == std::string::npos) {
-			cerr << "无效的 token 行: " << line << endl;
-			return Token{ TokenType::ERROR, line, 0, 0 };
-		}
-		std::string typeStr = line.substr(0, p1);
+		//一遍式方式
 
-		auto p2 = line.find(')', p1 + 1);
-		if (p2 == std::string::npos) {
-			cerr << "无效的 token 行(缺少 )): " << line << endl;
-			return Token{ TokenType::ERROR, line, 0, 0 };
-		}
-		std::string valueStr = line.substr(p1 + 1, p2 - p1 - 1);
-
-		// 查找行列对：在 p2 之后寻找下一个 '(' 和对应的 ')'
-		auto p3 = line.find('(', p2 + 1);
-		auto p4 = (p3 == std::string::npos) ? std::string::npos : line.find(')', p3 + 1);
-		int row = 0, column = 0;
-		if (p3 != std::string::npos && p4 != std::string::npos) {
-			std::string pos = line.substr(p3 + 1, p4 - p3 - 1);
-			auto comma = pos.find(',');
-			if (comma != std::string::npos) {
-				try {
-					row = std::stoi(pos.substr(0, comma));
-					column = std::stoi(pos.substr(comma + 1));
-				}
-				catch (...) {
-					row = 0; column = 0;
-				}
-			}
-		}
-
-		Token token;
-		auto it = typeMap.find(typeStr);
-		if (it != typeMap.end()) {
-			token.type = it->second;
-		}
-		else {
-			cerr << "未知Token类型: " << typeStr << " 行: " << line << endl;
-			token.type = TokenType::ERROR;
-		}
-
-		token.value = valueStr;
-		line_num=token.row = row;
-		token.column = column;
-		return token;
+		//std::string line;
+		//// 读取一行，若读不到则返回 EOF token
+		//if (!std::getline(srcFile, line)) {
+		//	return Token{ TokenType::EOF_TOKEN, "EOF", 0, 0 };
+		//}
+		//
+		//// 跳过空行
+		//while (line.empty() && std::getline(srcFile, line)) {}
+		//if (line.empty()) {
+		//	return Token{ TokenType::EOF_TOKEN, "EOF", 0, 0 };
+		//}
+		//
+		//// 期望格式: TYPE(value)(row,column)
+		//auto p1 = line.find('(');
+		//if (p1 == std::string::npos) {
+		//	cerr << "无效的 token 行: " << line << endl;
+		//	return Token{ TokenType::ERROR, line, 0, 0 };
+		//}
+		//std::string typeStr = line.substr(0, p1);
+		//
+		//auto p2 = line.find(')', p1 + 1);
+		//if (p2 == std::string::npos) {
+		//	cerr << "无效的 token 行(缺少 )): " << line << endl;
+		//	return Token{ TokenType::ERROR, line, 0, 0 };
+		//}
+		//std::string valueStr = line.substr(p1 + 1, p2 - p1 - 1);
+		//
+		//// 查找行列对：在 p2 之后寻找下一个 '(' 和对应的 ')'
+		//auto p3 = line.find('(', p2 + 1);
+		//auto p4 = (p3 == std::string::npos) ? std::string::npos : line.find(')', p3 + 1);
+		//int row = 0, column = 0;
+		//if (p3 != std::string::npos && p4 != std::string::npos) {
+		//	std::string pos = line.substr(p3 + 1, p4 - p3 - 1);
+		//	auto comma = pos.find(',');
+		//	if (comma != std::string::npos) {
+		//		try {
+		//			row = std::stoi(pos.substr(0, comma));
+		//			column = std::stoi(pos.substr(comma + 1));
+		//		}
+		//		catch (...) {
+		//			row = 0; column = 0;
+		//		}
+		//	}
+		//}
+		//
+		//Token token;
+		//auto it = typeMap.find(typeStr);
+		//if (it != typeMap.end()) {
+		//	token.type = it->second;
+		//}
+		//else {
+		//	cerr << "未知Token类型: " << typeStr << " 行: " << line << endl;
+		//	token.type = TokenType::ERROR;
+		//}
+		//
+		//token.value = valueStr;
+		//line_num=token.row = row;
+		//token.column = column;
+		//return token;
 	}
 
 	void skipToNextStatement() {
@@ -1297,10 +1312,10 @@ public:
 		cout << "\n开始语法分析,语义分析，pcode生成，符号表生成... " << endl;
 
 		currentToken = getNextToken();
-
+		cout << "ok" << endl;
 		while (!symbols.empty()) {
 			string symbol = symbols.front();
-			//cout << symbol <<"|" << currentToken.value << endl;
+			cout << symbol <<"|" << currentToken.value << endl;
 			if(!match(symbol)){
 				FirstSet fs;
 				cerr << "\n碰到语法错误" << endl;

@@ -1,23 +1,25 @@
+
 /*
 词法分析器（Tokenizer/Lexical Analyzer）
 */
 
 #pragma once
-#include<fstream>
-#include<string>
-#include<iostream>
-#include<unordered_map>
-#include"config.h"
+#include <fstream>
+#include <string>
+#include <iostream>
+#include <unordered_map>
+#include <vector>
+#include <limits>
+#include <cctype>
+#include "config.h"
 using namespace std;
-
-
 
 class tokenizationer
 {
 private:
 	ifstream srcFile;
 	ofstream outFile;
-	char currentChar;
+	int currentChar; // 使用 int 以正确表示 EOF
 	int row, column;
 
 	// 关键字映射表：键为小写关键字，值为对应 TokenType（快速匹配）
@@ -40,7 +42,7 @@ private:
 	};
 
 public:
-	tokenizationer(const string& srcPath, const string& outPath):currentChar(0),row(1),column(1)
+	tokenizationer(const string& srcPath, const string& outPath) : currentChar(0), row(1), column(0)
 	{
 		srcFile.open(srcPath);
 		outFile.open(outPath);
@@ -55,7 +57,6 @@ public:
 		}
 
 		nextchar();
-
 	}
 	~tokenizationer() {
 		if (srcFile.is_open()) {
@@ -72,19 +73,25 @@ public:
 			return;
 		}
 
-		currentChar = srcFile.get();
+		int c = srcFile.get();
+		if (c == EOF) {
+			currentChar = EOF;
+			return;
+		}
+		currentChar = c;
 
+		// 更新位置： column 表示 currentChar 的列（从1开始）
 		if (currentChar == '\n') {
 			row++;
-			column = 1;
+			column = 0; // 刚读到换行，下一次 nextchar() 会把 column 设为 1
 		}
-		else if (currentChar != EOF) {
+		else {
 			column++;
 		}
 	}
 
 	void skipspace() {
-		while (currentChar != EOF && isspace(currentChar)) {
+		while (currentChar != EOF && std::isspace(static_cast<unsigned char>(currentChar))) {
 			nextchar();
 		}
 	}
@@ -92,81 +99,92 @@ public:
 	Token gettoken() {
 		skipspace();
 		if (currentChar == EOF) {
-			
 			return Token(TokenType::EOF_TOKEN, "EOF", row, column);
 		}
-		
-		string token="";
-		if (isalpha(currentChar)) {//关键字或标识符
 
-			//记录起始位置
-			int startrow = row, startcolumn = column;
+		string token = "";
+		if (std::isalpha(static_cast<unsigned char>(currentChar))) { // 关键字或标识符
+			// 记录起始位置
+			int startrow = row;
+			int startcolumn = column;
 
-
-			while (currentChar != EOF && isalnum(currentChar)) {
-				token.push_back(tolower(currentChar));
+			while (currentChar != EOF && std::isalnum(static_cast<unsigned char>(currentChar))) {
+				token.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(currentChar))));
 				nextchar();
 			}
 
 			auto it = keywordMap.find(token);
-			if (it != keywordMap.end()) {//关键字
+			if (it != keywordMap.end()) { // 关键字
 				return Token(it->second, token, startrow, startcolumn);
 			}
-			else {//标识符
+			else { // 标识符
 				return Token(TokenType::IDENTIFIER, token, startrow, startcolumn);
 			}
-
 		}
-		else if(isdigit(currentChar)) {//数字
-			int startrow = row, startcolumn = column;
+		else if (std::isdigit(static_cast<unsigned char>(currentChar))) { // 数字
+			int startrow = row;
+			int startcolumn = column;
 
-			while (currentChar != EOF && !isspace(currentChar)) {
-				if (isalpha(currentChar))
-				{
-					//包含字母，错误
-					token.push_back(currentChar);
+			while (currentChar != EOF && !std::isspace(static_cast<unsigned char>(currentChar))) {
+				if (std::isalpha(static_cast<unsigned char>(currentChar))) {
+					// 包含字母，错误（例如 12a）
+					token.push_back(static_cast<char>(currentChar));
 					nextchar();
 					return Token(TokenType::ERROR, token, startrow, startcolumn);
 				}
-				else if(isdigit(currentChar)){
-					token.push_back(currentChar);
+				else if (std::isdigit(static_cast<unsigned char>(currentChar))) {
+					token.push_back(static_cast<char>(currentChar));
 					nextchar();
 				}
 				else {
 					break;
 				}
 			}
-			return Token(TokenType::INTEGER, token, row, column);
+			return Token(TokenType::INTEGER, token, startrow, startcolumn);
 		}
 		else {
-			//记录起始位置
-			int startrow = row, startcolumn = column;
+			// 记录起始位置
+			int startrow = row;
+			int startcolumn = column;
 			string lexeme = "";
 
 			switch (currentChar) {
-				//界符. , ; (  ) 
-			case ',':lexeme = ","; nextchar();
+				// 界符. , ; (  ) 
+			case ',':
+				lexeme = ",";
+				nextchar();
 				return Token(TokenType::COMMA, lexeme, startrow, startcolumn);
-			case ';':lexeme = ";";  nextchar();
+			case ';':
+				lexeme = ";";
+				nextchar();
 				return Token(TokenType::SEMICOLON, lexeme, startrow, startcolumn);
-			case '(':lexeme = "(";  nextchar();
+			case '(':
+				lexeme = "(";
+				nextchar();
 				return Token(TokenType::LPAREN, lexeme, startrow, startcolumn);
-			case ')':lexeme = ")"; nextchar();
+			case ')':
+				lexeme = ")";
+				nextchar();
 				return Token(TokenType::RPAREN, lexeme, startrow, startcolumn);
 
-				//运算符
-				//aop
+				// 运算符 aop
 			case '+':
-			case '-':lexeme = currentChar; nextchar();
+			case '-':
+				lexeme = static_cast<char>(currentChar);
+				nextchar();
 				return Token(TokenType::AOP, lexeme, startrow, startcolumn);
 
-				//mop
+				// mop
 			case '*':
-			case '/':lexeme = currentChar; nextchar();
+			case '/':
+				lexeme = static_cast<char>(currentChar);
+				nextchar();
 				return Token(TokenType::MOP, lexeme, startrow, startcolumn);
 
-				//关系运算符 lop  =、<>、<、<=、>、>=
-			case '=':lexeme = "="; nextchar();
+				// 关系运算符 lop  =、<>、<、<=、>、>=
+			case '=':
+				lexeme = "=";
+				nextchar();
 				return Token(TokenType::LOP, lexeme, startrow, startcolumn);
 			case '<':
 				lexeme = "<";
@@ -189,7 +207,7 @@ public:
 				}
 				return Token(TokenType::LOP, lexeme, startrow, startcolumn);
 
-			//赋值界符 :=	
+				// 赋值界符 :=
 			case ':':
 				lexeme = ":";
 				nextchar();
@@ -203,13 +221,11 @@ public:
 				}
 
 			default:
-				lexeme = currentChar;
+				lexeme = static_cast<char>(currentChar);
 				nextchar();
 				return Token(TokenType::ERROR, lexeme, startrow, startcolumn);
 			}
 		}
-		
-
 	}
 
 	void printtoken(Token token) {
@@ -257,7 +273,7 @@ public:
 	}
 
 	void tokenize() {
-		
+
 		Token token = gettoken();
 		cout << "开始词法分析... " << endl;
 		while (token.type != TokenType::EOF_TOKEN) {
@@ -270,42 +286,38 @@ public:
 			token = gettoken();
 		}
 		cout << "\n词法分析完成！Token 结果已保存到中间文件。" << endl;
-	
-		
+
+
 	}
 
+	// 从当前输入流连续读取 token 到 tokens（解析器可多次调用，流位置会继续）
+	// 约定：count > 0 => 读取最多 count 个；count <= 0 => 读取直到 EOF
 	void getTokens(int count, vector<Token>& tokens) {//获取count个token,存到tokens里
-		// 如果 count <= 0 则读取直到 EOF，否则读取最多 count 个 token
 		tokens.clear();
-		if (count == 0) return;
 
-		// 预分配，减少动态分配开销
-		if (count > 0) tokens.reserve(tokens.size() + count);
+		bool toEOF = (count <= 0);
+		int remaining = count > 0 ? count : numeric_limits<int>::max();
 
-		int readLimit = count;
-		bool unlimited = false;
-		if (count < 0) {
-			unlimited = true; // 读取至 EOF
-		}
+		if (count > 0) tokens.reserve(count);
 
-		while (unlimited || readLimit-- > 0) {
+		int read = 0;
+		while (read < remaining) {
 			Token t = gettoken();
 			tokens.push_back(t);
+			read++;
 
-			// 遇到词法错误时打印并停止读取（与 tokenize() 的行为一致）
 			if (t.type == TokenType::ERROR) {
+				// 打印错误，交由调用方决定后续处理（不在此 exit）
 				cerr << "ERROR(无效字符: '" << t.value << "')"
 					<< "(" << t.row << "," << t.column << ")" << endl;
 				break;
 			}
-			// 到达 EOF 停止
 			if (t.type == TokenType::EOF_TOKEN) {
+				break;
+			}
+			if (!toEOF && read >= remaining) {
 				break;
 			}
 		}
 	}
-
 };
-
-};
-
