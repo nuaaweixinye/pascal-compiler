@@ -3,6 +3,9 @@
 #include<unordered_map>
 #include<unordered_set>
 using namespace std;
+
+bool panic_mode = false;
+bool rectify_mode = true;
 // 单词类型枚举,终结符
 enum class TokenType {
 	// 关键字（共15个，严格对应 BNF 中的保留字）
@@ -29,6 +32,20 @@ enum class TokenType {
 	// 特殊标记
 	EOF_TOKEN,  // 文件结束标记
 	ERROR       // 无效字符错误
+};
+
+unordered_map<string,string> rectifyTokens = {
+    {"PROGRAM","program"}, {"CONST","const"}, {"VAR","var"}, {"PROCEDURE","procedure"}, {"CALL","call"},
+    {"BEGIN","begin"}, {"END","end"}, {"IF","if"}, {"THEN","then"}, {"ELSE","else"},
+    {"WHILE","while"}, {"DO","do"}, {"ODD","odd"}, {"READ","read"}, {"WRITE","write"},
+
+    // 界符和运算符的文本形式（便于纠错替换）
+    {"SEMICOLON",";"},  // ; （语句/说明结束）
+    {"COMMA"," ,"},      // , （多个标识符/常量分隔）
+    {"LPAREN","("},     // ( （参数/表达式开头）
+    {"RPAREN",")"},     // ) （参数/表达式结尾）
+    {"COLONEQUAL",":="}, // := （赋值符号，<statement> 中的赋值语句）
+
 };
 
 struct Token {
@@ -104,8 +121,6 @@ string tokenTypeName(TokenType t) {
 	}
 }
 
-// 定义空串常量表示 EPSILON（空产生式）
-const string EPSILON = "";
 
 class FirstSet {
 private:
@@ -118,31 +133,31 @@ private:
 		{"<block>", {"CONST", "VAR", "PROCEDURE", "BEGIN"}},
 
 		// 常量声明相关
-		{"<condecl_opt>", {"CONST", EPSILON}},
+		{"<condecl_opt>", {"CONST"  }},
 		{"<condecl>", {"CONST"}},
 		{"<const_list>", {"ID"}},
 		{"<const>", {"ID"}},
-		{"<const_list_tail>", {"COMMA", EPSILON}},
+		{"<const_list_tail>", {"COMMA" }},
 
 		// 变量声明相关
-		{"<vardecl_opt>", {"VAR", EPSILON}},
+		{"<vardecl_opt>", {"VAR" }},
 		{"<vardecl>", {"VAR"}},
 
 		// 过程声明相关
-		{"<proc_opt>", {"PROCEDURE", EPSILON}},
+		{"<proc_opt>", {"PROCEDURE"}},
 		{"<proc>", {"PROCEDURE"}},
-		{"<param_list_opt>", {"LPAREN", EPSILON}},  // 可选参数列表
-		{"<id_list_opt>", {"ID", EPSILON}},
-		{"<proc_tail>", {"SEMICOLON", EPSILON}},
+		{"<param_list_opt>", {"LPAREN"}},  // 可选参数列表
+		{"<id_list_opt>", {"ID"}},
+		{"<proc_tail>", {"SEMICOLON"}},
 
 		// 程序体
 		{"<body>", {"BEGIN"}},
 
 		// 语句相关
 		{"<statement_list>", {"ID", "IF", "WHILE", "CALL", "BEGIN", "READ", "WRITE"}},
-		{"<statement_tail>", {"SEMICOLON", EPSILON}},
+		{"<statement_tail>", {"SEMICOLON"}},
 		{"<statement>", {"ID", "IF", "WHILE", "CALL", "BEGIN", "READ", "WRITE"}},
-		{"<else_opt>", {"ELSE", EPSILON}},
+		{"<else_opt>", {"ELSE" }},
 
 		// 循环语句
 		{"<while_stmt>", {"WHILE"}},
@@ -154,26 +169,26 @@ private:
 
 		// 算术表达式
 		{"<exp>", {"AOP", "ID", "INTEGER", "LPAREN"}},
-		{"<sign_opt>", {"AOP", EPSILON}},
+		{"<sign_opt>", {"AOP" }},
 		{"<term>", {"ID", "INTEGER", "LPAREN"}},
 		{"<factor>", {"ID", "INTEGER", "LPAREN"}},
-		{"<exp_tail>", {"AOP", EPSILON}},
-		{"<term_tail>", {"MOP", EPSILON}},
+		{"<exp_tail>", {"AOP"}},
+		{"<term_tail>", {"MOP" }},
 
 		// 过程调用语句
 		{"<call_stmt>", {"CALL"}},
-		{"<arg_list_opt>", {"LPAREN", EPSILON}},
+		{"<arg_list_opt>", {"LPAREN" }},
 
 		// 表达式列表（参数/输出用）
-		{"<exp_list_opt>", {"ID", "INTEGER", "LPAREN", "AOP", EPSILON}},
+		{"<exp_list_opt>", {"ID", "INTEGER", "LPAREN", "AOP" }},
 		{"<exp_list>", {"ID", "INTEGER", "LPAREN", "AOP"}},
-		{"<exp_list_tail>", {"COMMA", EPSILON}},
+		{"<exp_list_tail>", {"COMMA" }},
 
 		// 输入输出语句
 		{"<read_stmt>", {"READ"}},
 		{"<id_list>", {"ID"}},
-		{"<id_list_tail>", {"COMMA", EPSILON}},
-		{"<write_stmt>", {"WRITE"}}
+		{"<id_list_tail>", {"COMMA",}},
+		{"<write_stmt>", {"WRITE"}},
 	};
 
 public:
@@ -197,7 +212,19 @@ public:
 			cout << "}";
 		}
 		else {
-			cout << "Non-terminal " << nonTerminal << " not found in First sets." << endl;
+			cout << "{}" << endl;
+		}
+	}
+
+	//返回对应非终结符的First集
+	vector<string> getFirstSet(const string& nonTerminal) {
+		auto iter = firstSets.find(nonTerminal);
+		if (iter != firstSets.end()) {
+			
+			return vector<string>(iter->second.begin(), iter->second.end());
+		}
+		else {
+			return {};
 		}
 	}
 };

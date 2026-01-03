@@ -257,20 +257,55 @@ public:
 	}
 
 	void tokenize() {
+		
 		Token token = gettoken();
-		cout << "开始词法分析... "<< endl;
+		cout << "开始词法分析... " << endl;
 		while (token.type != TokenType::EOF_TOKEN) {
-			if(token.type==TokenType::ERROR){
+			if (token.type == TokenType::ERROR) {
 				cerr << "ERROR(无效字符: '" << token.value << "')"
-					<< "(" << token.row << "," << token.column << ")" << endl; 
+					<< "(" << token.row << "," << token.column << ")" << endl;
 				exit(1);
 			}
 			printtoken(token);
 			token = gettoken();
 		}
 		cout << "\n词法分析完成！Token 结果已保存到中间文件。" << endl;
+	
+		
 	}
 
+	void getTokens(int count, vector<Token>& tokens) {//获取count个token,存到tokens里
+		// 如果 count <= 0 则读取直到 EOF，否则读取最多 count 个 token
+		tokens.clear();
+		if (count == 0) return;
+
+		// 预分配，减少动态分配开销
+		if (count > 0) tokens.reserve(tokens.size() + count);
+
+		int readLimit = count;
+		bool unlimited = false;
+		if (count < 0) {
+			unlimited = true; // 读取至 EOF
+		}
+
+		while (unlimited || readLimit-- > 0) {
+			Token t = gettoken();
+			tokens.push_back(t);
+
+			// 遇到词法错误时打印并停止读取（与 tokenize() 的行为一致）
+			if (t.type == TokenType::ERROR) {
+				cerr << "ERROR(无效字符: '" << t.value << "')"
+					<< "(" << t.row << "," << t.column << ")" << endl;
+				break;
+			}
+			// 到达 EOF 停止
+			if (t.type == TokenType::EOF_TOKEN) {
+				break;
+			}
+		}
+	}
+
+};
 
 };
 

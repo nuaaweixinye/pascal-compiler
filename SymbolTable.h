@@ -179,8 +179,11 @@ public:
 
     // 设置过程入口地址（P代码生成时回填）
     void setProcEntryAddr(int addr) {
-        cerr << "错误：符号 " << name_ << " 不是过程，无法设置入口地址" << endl;
-        return;
+        if (type_ != SYMBOLTYPE::PROC) {
+            cerr << "错误：符号 " << name_ << " 不是过程，无法设置入口地址" << endl;
+            return;
+        }
+        attr_.proc_attr.entry_addr = addr;
     }
 
     // 链表指针（层内符号链表）

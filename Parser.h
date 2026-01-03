@@ -12,9 +12,11 @@ P代码生成
 #include<vector>
 #include<unordered_map>
 #include<unordered_set>
+#include<algorithm>
 #include"config.h"
 #include"SymbolTable.h"
 #include"Pcode.h"
+#include "tokenization.h"
 
 using namespace std;
 
@@ -41,8 +43,20 @@ private:
 	fstream srcFile;//中间文件，存放词法分析结果
 	vector<string> symbols;//符号栈，非终结符
 	Token currentToken;
-
+	string state = "";//当前状态
+	unordered_set<string> panicstates = { "assignment","if","while","call","read","write"};
+	unordered_map<string, vector<string>> panicstatemap = {
+		{"assignment",{"ID",":=", "< exp >" ,"_assignment"}},
+		{"if",{"_if" , "then", "< statement >", "_else_if", "< else_opt >", "_end_else"}},
+		{"while",{"while" ,"_begin_while" , " <lexp>", "_while" , "do" ,"<statement>", "_end_while"}},
+		{"call",{"call", "ID", "< arg_list_opt >",")" ,"_call"}},
+		{"read",{"read", "(" ,"< id_list >" ,")","_read"  }},
+		{"write",{"write", "(" ,"< exp_list >",")" "_write"}}
 	
+	};
+
+	bool back_token = false;
+
 	// 打印终结符详细错误
 	void syntaxErrorDetail(const string& expected, const string& hint = "") {
 		cerr << "语法错误: 在(" << currentToken.row << "," << currentToken.column << ")处，期望 "
@@ -60,10 +74,27 @@ private:
 			return true;
 		}
 		// 报错并尝试恢复：先提示，再跳到下一个同步点继续解析
-		syntaxErrorDetail(name, hint);
+		//syntaxErrorDetail(name, hint);
 		return false;
 	}
 
+
+	// 新增：放在 class Parser 的 private 部分
+	void reportSemanticError(const string& msg, const Token& tok) {
+		cerr << "语义错误: 在(" << tok.row << "," << tok.column << ")处: " << msg << endl;
+		exit(1);
+	}
+
+	Symbol* lookupSymbolOrReport(const string& name, const Token& tok) {
+		try {
+			int level_diff = 0;
+			return symTable.findGlobal(name, level_diff);
+		}
+		catch (const SymbolError& e) {
+			reportSemanticError(e.what(), tok);
+			return nullptr; // 不会到这行，但方便编译器分析
+		}
+	}
 
 
 public:
@@ -82,6 +113,12 @@ public:
 	}
 
 	Token getNextToken() {// 从 srcFile 中获取下一个 Token 的逻辑
+		if (back_token) {
+			back_token = false;
+			return Token();
+		}
+
+
 		std::string line;
 		// 读取一行，若读不到则返回 EOF token
 		if (!std::getline(srcFile, line)) {
@@ -143,6 +180,19 @@ public:
 		return token;
 	}
 
+	void skipToNextStatement() {
+
+		// 跳过直到下一个分号或 END 关键字
+		while (currentToken.type != TokenType::SEMICOLON &&
+			currentToken.type != TokenType::END &&
+			currentToken.type != TokenType::EOF_TOKEN) {
+			currentToken = getNextToken();
+		}
+		// 如果遇到分号，则再读取下一个 token 继续
+		if (currentToken.type == TokenType::SEMICOLON) {
+			currentToken = getNextToken();
+		}
+	}
 
 	bool match(string symbol) {
 		/*
@@ -263,8 +313,8 @@ public:
 			Code[PC++] = { OPR, 0, 0 };*/
 			pcode.emit("OPR", 0, 0);
 			//调试
-			symTable.printTable();
-			pcode.printCode();
+			/*symTable.printTable();
+			pcode.printCode();*/
 
 			symbols.erase(symbols.begin());
 			return true;
@@ -347,6 +397,7 @@ public:
 			symName.pop_back();
 			pcode.emit("STO", var_sym->getLevel(), var_sym->getOffset());
 
+			state = "";
 			symbols.erase(symbols.begin());
 			return true;
 		}
@@ -372,6 +423,9 @@ public:
 		if (symbol == "_end_else") {
 			//回填else JMP
 			pcode.backPatch("else_JMP", pcode.PC);
+
+
+			state = "";
 			symbols.erase(symbols.begin());
 			return true;
 		}
@@ -398,7 +452,7 @@ public:
 			//回填while 跳转指令JPC
 			pcode.backPatch("while_JPC", pcode.PC);
 
-
+			state = "";
 			symbols.erase(symbols.begin());
 			return true;
 		}
@@ -421,6 +475,7 @@ public:
 			pcode.emit("CAL", level_diff, proc_sym->getProcEntryAddr());
 			arg_count = 0;//清空参数个数
 
+			state = "";
 			symbols.erase(symbols.begin());
 			return true;
 		}
@@ -435,6 +490,7 @@ public:
 			}
 			symName.clear();
 
+			state = "";
 			symbols.erase(symbols.begin());
 			return true;
 		}
@@ -444,6 +500,7 @@ public:
 				pcode.emit("WRT", 0, 0);
 			}
 
+			state = "";
 			symbols.erase(symbols.begin());
 			return true;
 		}
@@ -511,12 +568,12 @@ public:
 			Code[PC++] = { LOD, L, id };*/
 
 			int diff = 0;
-			Symbol* sym = symTable.findGlobal( symName.back(), diff);
+			Symbol* sym = lookupSymbolOrReport(symName.back(), currentToken);
 			symName.pop_back();
 
 			//检查符号类型
 			if (sym->getType() == SYMBOLTYPE::PROC) {
-				cerr << line_num << "行,表达式中，" << sym->name_ << "是过程，不能作为因子" << endl;
+				reportSemanticError(sym->getName() + " 是过程，不能作为因子", currentToken);
 			}
 
 			int A = sym->getOffset();
@@ -810,6 +867,8 @@ public:
 			*/
 			//first: ID, "if", "while", "call", "begin", "read", "write"
 			if (currentToken.type == TokenType::IDENTIFIER) {
+				state = "assignment";
+
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "_assignment");
 				symbols.insert(symbols.begin(), "<exp>");
@@ -819,6 +878,8 @@ public:
 				return true;
 			}
 			else if (currentToken.type == TokenType::IF) {
+				state = "if";
+
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "_end_else");
 				symbols.insert(symbols.begin(), "<else_opt>");
@@ -833,11 +894,15 @@ public:
 				return true;
 			}
 			else if (currentToken.type == TokenType::WHILE) {
+				state = "while";
+
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "<while_stmt>");
 				return true;
 			}
 			else if (currentToken.type == TokenType::CALL) {
+				state = "call";
+
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "<call_stmt>");
 				return true;
@@ -848,6 +913,8 @@ public:
 				return true;
 			}
 			else if (currentToken.type == TokenType::READ) {
+				state = "read";
+
 				symbols.erase(symbols.begin());
 				symbols.insert(symbols.begin(), "<read_stmt>");
 				return true;
@@ -1153,11 +1220,12 @@ public:
 
 
 		if (symbol ==  "<read_stmt>") {
-			//<read_stmt>   → "read" "(" < id_list >  "_read"  ")"
+			//<read_stmt>   → "read" "(" < id_list > ")"   "_read"
 			if (currentToken.type == TokenType::READ) {
 				symbols.erase(symbols.begin());
-				symbols.insert(symbols.begin(), "RPAREN");
+
 				symbols.insert(symbols.begin(), "_read");
+				symbols.insert(symbols.begin(), "RPAREN");
 				symbols.insert(symbols.begin(), "<id_list>");
 				symbols.insert(symbols.begin(), "LPAREN");
 
@@ -1199,12 +1267,14 @@ public:
 
 
 		if (symbol == "<write_stmt>") {
-			//<write_stmt>  → "write" "(" < exp_list >   "_write"   ")"
+			//<write_stmt>  → "write" "(" < exp_list >  ")"  "_write"
 			if (currentToken.type == TokenType::WRITE) {
+				state = "write";
+
 				symbols.erase(symbols.begin());
 				arg_count = 0;//初始化参数个数
-				symbols.insert(symbols.begin(), "RPAREN");
 				symbols.insert(symbols.begin(), "_write");
+				symbols.insert(symbols.begin(), "RPAREN");
 				symbols.insert(symbols.begin(), "<exp_list>");
 				symbols.insert(symbols.begin(), "LPAREN");
 				currentToken = getNextToken();
@@ -1221,6 +1291,8 @@ public:
 		}
 	}
 
+
+
 	void parse() {
 		cout << "\n开始语法分析,语义分析，pcode生成，符号表生成... " << endl;
 
@@ -1231,15 +1303,123 @@ public:
 			//cout << symbol <<"|" << currentToken.value << endl;
 			if(!match(symbol)){
 				FirstSet fs;
-				cerr << "\n语法错误\t也许你期望："<<symbol;
+				cerr << "\n碰到语法错误" << endl;
+				/*cerr << "  在(" << currentToken.row << ","
+					<< currentToken.column << ")处，遇到无效符号'" << currentToken.value << "'" << endl;
+				cerr << "期望符号为:" << symbol<<" ";
 				fs.printFirstSet(symbol);
-				cerr << "\t 在(" << currentToken.row << ","
-					<< currentToken.column << ")处，遇到无效符号 '" << currentToken.value << "'" << endl;
-				exit(1);
+				exit(0);*/
+
+
+				//错误修正和panic_mode
+				if (rectify_mode) {
+					cout << "尝试错误修正...";
+					vector<string> expected_tokens = fs.getFirstSet(symbol);
+					bool corrected = false;
+					auto it = rectifyTokens.find(symbol);
+					if (it != rectifyTokens.end()) {
+						
+						Token tmpt = currentToken;
+						currentToken.type = typeMap[it->first];
+						cout<< "在(" << currentToken.row << ", "<< currentToken.column << ")"
+							<<tmpt.value << "前添加符号" << it->second << "。  "<<endl;
+						back_token = true;
+						if (match(symbol)) {
+							corrected = true;
+							currentToken = tmpt;
+
+						}
+					}
+					else {
+						bool f = true;
+						for (string ex : expected_tokens) {
+							auto it = rectifyTokens.find(ex);
+							if (it != rectifyTokens.end()) {
+								continue;
+							}
+							f = false;
+							break;
+						}
+						if (f) {
+							for (string ex : expected_tokens) {
+								auto it = rectifyTokens.find(ex);
+								if (it != rectifyTokens.end()) {
+
+									Token tmpt = currentToken;
+									currentToken.type = typeMap[it->first];
+									cout << "在(" << currentToken.row << ", " << currentToken.column << ")"
+										<< tmpt.value << "前添加符号" << it->second << "。  " << endl;
+									back_token = true;
+									if (match(symbol)) {
+										corrected = true;
+										currentToken = tmpt;
+
+									}
+									break;
+								}
+							}
+						}
+					}
+
+					if (corrected == false) {
+						
+						if (panic_mode) {
+							cout << "错误修正失败，进入panic mode错误恢复..." << endl;
+							if (panicstates.find(state) != panicstates.end()) {
+								vector<string> v = panicstatemap[state];
+								vector<string>::iterator it;
+								bool flag = false;
+								while (!symbols.empty()) {
+									it = find(v.begin(), v.end(), symbol);
+									if (it == v.end()) {
+										symbols.erase(symbols.begin());
+										symbol = symbols.front();
+										continue;
+									}
+									flag = true;
+									break;
+								}
+								if (flag) {
+									while (it != v.end()) {
+										if (symbol == *it) {
+											symbols.erase(symbols.begin());
+											symbol = symbols.front();
+											it++;
+											continue;
+										}
+										break;
+									}
+								}
+
+							}
+							
+							else {
+								cout << "严重错误!" << endl;
+
+								cerr << "期望符号为:" << symbol;
+								fs.printFirstSet(symbol);
+						
+								exit(0);
+							}
+						}
+						else {
+							cerr << "修复失败" << endl;
+							cerr << "  在(" << currentToken.row << ","
+								<< currentToken.column << ")处，遇到无效符号'" << currentToken.value << "'" << endl;
+							cerr << "期望符号为:" << symbol<<" ";
+							fs.printFirstSet(symbol);
+							exit(0);
+						}
+					}
+					
+				}
+				
+				
+				
 			}
 		}
 
-		cout << "\n语法分析成功，源程序符合语法规则！" << endl;
+		cout << "\n\n语法分析成功，源程序符合语法规则！" << endl;
 		cout << "符号表建立，pcode生成完毕！\n\n" << endl;
 
 		pcode.interpret(symTable);

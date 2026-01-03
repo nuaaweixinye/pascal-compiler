@@ -12,7 +12,7 @@ using namespace std;
 
 fstream File;
 
-bool key = false;//关键字标志
+bool key = false;//用于调试
 vector<int> write_result;//写入结果存放
 
 /*
@@ -317,9 +317,14 @@ public:
 	}
 
 	void printCode() {
-		cout << "\n生成的Pcode代码如下：\n" << endl;
+		if (key) {
+			cout << "\n生成的Pcode代码如下：\n" << endl;
+			for (int i = 0; i < code.size(); i++) {
+				cout << i << ": " << code[i].op << " " << code[i].L << " " << code[i].A << endl;
+			}
+		}
 		for (int i = 0; i < code.size(); i++) {
-			cout << i << ": " << code[i].op << " " << code[i].L << " " << code[i].A << endl;
+			File<< i << ": " << code[i].op << " " << code[i].L << " " << code[i].A << endl;
 		}
 	}
 	Ins& getInstruction(int index) { // 改用Ins&（私有结构体在类内部可正常返回）
@@ -347,7 +352,7 @@ public:
 			Ins instr = getInstruction(pc);
 			pc++;
 			string op = instr.op;
-			cout<<pc-1<<": " << op << " " << instr.L << " " << instr.A << endl;
+			if(key)cout<<pc-1<<": " << op << " " << instr.L << " " << instr.A << endl;
 			File << pc - 1 << ": " << op << " " << instr.L << " " << instr.A << endl;
 			if(op == "LIT") {// 常量入栈
 				int value = instr.A;
@@ -550,7 +555,7 @@ public:
 				cerr << "未知操作码: " << op << endl;
 				break;
 			}
-			if(key) Ac.printStack();
+			Ac.printStack();
 		}
 
 	}
