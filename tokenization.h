@@ -275,7 +275,6 @@ public:
 	void tokenize() {
 
 		Token token = gettoken();
-		cout << "开始词法分析... " << endl;
 		while (token.type != TokenType::EOF_TOKEN) {
 			if (token.type == TokenType::ERROR) {
 				cerr << "ERROR(无效字符: '" << token.value << "')"
@@ -285,7 +284,7 @@ public:
 			printtoken(token);
 			token = gettoken();
 		}
-		cout << "\n词法分析完成！Token 结果已保存到中间文件。" << endl;
+		cout << "\n词法分析的全部Token 结果已保存到中间文件outTokens.txt中" << endl;
 
 
 	}

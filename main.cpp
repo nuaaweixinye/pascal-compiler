@@ -16,11 +16,15 @@ int main(int argc,char* argv[])
 
 	}
 	else {
-		tokenizationer Plexer("pascal.txt", "out.txt");
+		tokenizationer Plexer("pascal.txt", "outTokens.txt");
 		Plexer.tokenize();
 		Parser paser("out.txt");
 		paser.parse();
 	}
 
+	//
+	cout << "\n\n解释执行pcode..." << endl;
+	pcode.interpret(symTable, "pcode.txt");
+	cout << "\n\n活动记录栈可在pcode_output.txt文件中查看； 或者运行main.py程序展示动画过程" << endl;
 	return 0;
 }

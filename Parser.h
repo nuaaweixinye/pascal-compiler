@@ -1451,7 +1451,10 @@ public:
 		cout << "\n\n语法分析成功，源程序符合语法规则！" << endl;
 		cout << "符号表建立，pcode生成完毕！\n\n" << endl;
 
-		pcode.interpret(symTable);
+		pcode.printCode();
+
+		pcode.printCodeFile("pcode.txt");
+		//pcode.interpret(symTable);
 		
 	}
 

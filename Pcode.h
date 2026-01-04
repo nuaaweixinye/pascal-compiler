@@ -12,7 +12,7 @@ using namespace std;
 
 fstream File;
 
-bool key = true;//用于调试
+bool key = false;//用于调试
 vector<int> write_result;//写入结果存放
 
 /*
@@ -226,9 +226,10 @@ public:
 
 	void printStack() {
 		//从栈顶到底打印
-		cout << "\n当前活动记录栈内容：" << endl;
+		if (key) cout << "\n当前活动记录栈内容：" << endl;
+
 		for(int i = top - 1; i >= 0; i--) {
-			cout << "[" << i << "]: " << stack.at(i) << endl;
+			if(key)cout << "[" << i << "]: " << stack.at(i) << endl;
 			File << "[" << i << "]: " << stack.at(i) << endl;
 		}
 	}
@@ -542,6 +543,7 @@ public:
 			}
 			else if (op == "RED") {// 读入值入栈
 				string input;
+				cout << "等待输入：" << endl;
 				cin >> input;
 				Ac.push(input);
 
@@ -555,13 +557,109 @@ public:
 				cerr << "未知操作码: " << op << endl;
 				break;
 			}
+			
 			Ac.printStack();
+			
 		}
 
 	}
 
+	void printCodeFile(string file) {
+		fstream f;
+		f.open(file, ios::out);
+		if (!f.is_open()) {
+			cerr << file << " can't open" << endl;
+			exit(1);
+		}
+		for (int i = 0; i < code.size(); i++) {
+			f<< i << ": " << code[i].op << " " << code[i].L << " " << code[i].A << endl;
+		}
+		cout << "pcode已输出到文件," << file << endl;
+		f.close();
+	}
 
+	//从文件读取pcode并执行
+	void interpret(SymbolTable& symTable, string file) {
+		ifstream ifs(file);
+		if (!ifs.is_open()) {
+			cerr << "无法打开 Pcode 文件: " << file << endl;
+			return;
+		}
 
+		code.clear();
+		PC = 0;
+
+		auto trim = [](const string& s) -> string {
+			size_t l = s.find_first_not_of(" \t\r\n");
+			if (l == string::npos) return "";
+			size_t r = s.find_last_not_of(" \t\r\n");
+			return s.substr(l, r - l + 1);
+			};
+
+		string line;
+		while (std::getline(ifs, line)) {
+			line = trim(line);
+			if (line.empty()) continue;
+
+			// 期望格式: INDEX: OP L A
+			size_t colon = line.find(':');
+			if (colon == string::npos) continue;
+
+			string after = trim(line.substr(colon + 1));
+			if (after.empty()) continue;
+
+			// 解析 op, L, A（三个字段以空白分隔）
+			size_t pos = 0;
+			size_t next = after.find_first_of(" \t", pos);
+			string opStr;
+			if (next == string::npos) {
+				opStr = after;
+			}
+			else {
+				opStr = after.substr(pos, next - pos);
+				pos = after.find_first_not_of(" \t", next);
+			}
+
+			int L = 0;
+			int A = 0;
+			if (pos != string::npos && pos < after.size()) {
+				next = after.find_first_of(" \t", pos);
+				string Ls;
+				if (next == string::npos) {
+					Ls = after.substr(pos);
+					pos = string::npos;
+				}
+				else {
+					Ls = after.substr(pos, next - pos);
+					pos = after.find_first_not_of(" \t", next);
+				}
+				try { L = stoi(Ls); }
+				catch (...) { L = 0; }
+			}
+			if (pos != string::npos && pos < after.size()) {
+				next = after.find_first_of(" \t", pos);
+				string As;
+				if (next == string::npos) As = after.substr(pos);
+				else As = after.substr(pos, next - pos);
+				try { A = stoi(As); }
+				catch (...) { A = 0; }
+			}
+
+			Ins instruction;
+			instruction.op = opStr;
+			instruction.L = L;
+			instruction.A = A;
+			code.push_back(instruction);
+		}
+
+		ifs.close();
+
+		// 与 emit 的约定：PC 为代码长度
+		PC = static_cast<int>(code.size());
+
+		// 调用已有的解释器入口执行（无文件版本）
+		interpret(symTable);
+	}
 
 };
 
